@@ -2,7 +2,7 @@
 
 蛍光顕微鏡画像（DAPI・赤・緑）から、**核の数**と、**赤・緑のドット状シグナルが重なる核（共発現）の数**を自動で数えるWebアプリです。ブラウザだけで動き、インストールは不要です。画像は使っている端末の中だけで処理され、外部には送信されません。
 
-**▶ アプリを開く：https://github.com/yikejiri/nuclei_counter**
+**▶ アプリを開く：https://yikejiri.github.io/nuclei_counter**
 
 ![アプリの画面](images/screenshot.png)
 
