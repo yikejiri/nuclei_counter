@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>核カウンター｜DAPI・赤・緑ドットの一括解析</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pako@1.0.11/dist/pako.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{
+  --bg:#EDF0F4; --panel:#FFFFFF; --ink:#18202B; --muted:#5B6676; --line:#D3D9E2;
+  --accent:#2E4BD6; --accent-ink:#FFFFFF; --soft:#E3E8F7;
+  --c-dapi:#3D5BFF; --c-red:#E5484D; --c-green:#2FA866; --c-both:#D9A400; --c-neg:#8D97A6;
+  --danger:#C2373C; --ok:#2B8A57;
+  color-scheme:light; box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#11151B; --panel:#1A2028; --ink:#E6EAF0; --muted:#9AA5B4; --line:#2D3541;
+    --accent:#8197FF; --accent-ink:#0B1024; --soft:#232C42;
+    --c-dapi:#7189FF; --c-red:#FF6B6F; --c-green:#4CCB86; --c-both:#F2C230; --c-neg:#8D97A6;
+    --danger:#FF7A7E; --ok:#5BD08F; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11151B; --panel:#1A2028; --ink:#E6EAF0; --muted:#9AA5B4; --line:#2D3541;
+  --accent:#8197FF; --accent-ink:#0B1024; --soft:#232C42;
+  --c-dapi:#7189FF; --c-red:#FF6B6F; --c-green:#4CCB86; --c-both:#F2C230; --c-neg:#8D97A6;
+  --danger:#FF7A7E; --ok:#5BD08F; color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"IBM Plex Sans JP","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",sans-serif;
+  font-size:14px;line-height:1.6;font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+header.top{padding:18px 22px 14px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+header.top h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.02em;display:flex;align-items:center;gap:10px}
+.dots{display:inline-flex;gap:3px}
+.dots i{width:9px;height:9px;border-radius:50%;display:block}
+header.top p{margin:0;color:var(--muted);font-size:13px;max-width:78ch}
+
+.layout{display:grid;grid-template-columns:340px minmax(0,1fr) 340px;align-items:start}
+@media (max-width:1200px){.layout{grid-template-columns:330px minmax(0,1fr)}.results{grid-column:1 / -1;border-left:0!important;border-top:1px solid var(--line)}}
+@media (max-width:760px){.layout{grid-template-columns:1fr}.controls{border-right:0!important;border-bottom:1px solid var(--line)}}
+
+.controls{border-right:1px solid var(--line);background:var(--panel);padding:6px 0 20px}
+.step{padding:14px 20px 16px;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:0}
+.step h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:10px}
+.step h2 .n{width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:12px;display:inline-grid;place-items:center;flex:none}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+fieldset:disabled{opacity:.55}
+
+.slots{display:grid;gap:6px}
+.slot{display:grid;grid-template-columns:12px 1fr auto;align-items:center;gap:10px;padding:6px 6px 6px 8px;border-radius:7px;background:var(--bg)}
+.slot .chip{width:12px;height:12px;border-radius:3px}
+.slot .meta{min-width:0}
+.slot .meta b{display:block;font-size:13px;font-weight:500}
+.slot .meta span{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot.ok .meta span{color:var(--ink)}
+.hint{font-size:12px;color:var(--muted);margin:8px 0 0}
+.warn{font-size:12px;color:var(--danger);margin:8px 0 0}
+
+.pairs{margin-top:10px;max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:7px}
+.pairs table{font-size:11px}
+.pairs td,.pairs th{text-align:left;padding:3px 6px;max-width:90px;overflow:hidden;text-overflow:ellipsis}
+.pairs tbody tr{cursor:pointer}
+.pairs tbody tr:hover{background:var(--soft)}
+.pairs tr.on{background:var(--soft);font-weight:500}
+
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:6px 12px;cursor:pointer;font-size:13px;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
+.btn.small{padding:3px 9px;font-size:12px}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--danger)}
+.btn.wide{width:100%;padding:9px 12px;font-size:14px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg label{position:relative;text-align:center;padding:7px 6px;font-size:13px;cursor:pointer;background:var(--panel)}
+.seg label+label{border-left:1px solid var(--line)}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--accent);color:var(--accent-ink);font-weight:500}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.sub-h{font-size:13px;font-weight:700;margin:16px 0 2px;display:flex;align-items:center;gap:8px}
+.sub-h:first-child{margin-top:0}
+.sub-h i{width:10px;height:10px;border-radius:3px}
+
+.field{margin:10px 0 0}
+.field .lbl{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+.field .lbl output{font-weight:700;min-width:3ch;text-align:right}
+.field .sub,.sub{font-size:12px;color:var(--muted);margin:2px 0 0}
+.field .ctl{display:flex;align-items:center;gap:8px;margin-top:4px}
+input[type=range]{width:100%;accent-color:var(--accent);margin:0}
+.check{display:flex;align-items:flex-start;gap:8px;margin:10px 0 0;font-size:13px;cursor:pointer}
+.check input{accent-color:var(--accent);margin-top:4px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.pair label{font-size:12px;color:var(--muted)}
+.pair input{width:100%;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--bg)}
+
+.viewer{padding:14px 18px 20px;min-width:0}
+.vhead{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:8px;min-height:30px}
+.vhead .name{font-weight:700;font-size:14px;word-break:break-all}
+.vhead .badge{font-size:12px;padding:1px 9px;border-radius:999px;background:var(--soft);color:var(--ink)}
+.actbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;margin-bottom:10px;border-radius:10px;background:var(--soft);border:1px solid var(--line)}
+.actbar .t{font-size:13px;flex:1;min-width:180px}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:10px}
+.tog{position:relative;display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;padding:3px 9px 3px 6px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+.tog input{position:absolute;opacity:0;pointer-events:none}
+.tog i{width:11px;height:11px;border-radius:50%;opacity:.25;transition:opacity .15s}
+.tog:has(input:checked) i{opacity:1}
+.tog:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.toolbar .grow{flex:1}
+.toolbar label.inline{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.toolbar input[type=range]{width:100px}
+.toolbar select{border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--panel)}
+
+.stage{position:relative;background:#000;border-radius:10px;overflow:auto;max-height:74vh;min-height:360px;display:grid;place-items:center}
+.stage canvas{display:block;image-rendering:pixelated;cursor:crosshair}
+.stage.fit canvas{width:100%;height:auto}
+.empty{color:#C9D1DC;text-align:center;padding:40px 24px;max-width:48ch}
+.empty .ring{width:92px;height:92px;margin:0 auto 18px;position:relative}
+.empty .ring span{position:absolute;width:52px;height:52px;border-radius:50%;mix-blend-mode:screen}
+.empty p{margin:0 0 16px;font-size:14px;line-height:1.75}
+.busy{position:absolute;top:10px;right:10px;background:rgba(0,0,0,.7);color:#fff;font-size:12px;padding:4px 10px;border-radius:999px;display:none}
+.busy.on{display:block}
+.info{margin-top:10px;font-size:13px;color:var(--muted);min-height:1.6em}
+.info b{color:var(--ink)}
+.info .tag{display:inline-block;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;color:#111;margin-left:4px}
+.info .btn{margin-left:8px}
+
+.results{border-left:1px solid var(--line);background:var(--panel);padding:16px 20px 24px}
+.results h2{margin:0 0 8px;font-size:15px;font-weight:700}
+.results section+section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.prog{margin-top:10px}
+.prog .ptext{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.prog .pbar{height:8px;border-radius:4px;background:var(--bg);overflow:hidden;margin-top:4px}
+.prog .pbar div{height:100%;width:0;background:var(--accent);transition:width .2s}
+.msg{font-size:12px;margin:8px 0 0;color:var(--muted)}
+.msg.ok{color:var(--ok)}
+.msg.err{color:var(--danger)}
+.total{display:flex;align-items:baseline;gap:8px;padding:4px 0 10px;border-bottom:1px solid var(--line)}
+.total strong{font-size:30px;line-height:1;font-weight:700}
+.total span{color:var(--muted);font-size:13px}
+.counts{list-style:none;margin:6px 0 0;padding:0}
+.counts li{display:grid;grid-template-columns:12px 1fr auto 4.5em;gap:10px;align-items:center;padding:4px 0;font-size:13px}
+.counts li i{width:12px;height:12px;border-radius:3px}
+.counts li b{font-weight:700;text-align:right}
+.counts li em{font-style:normal;color:var(--muted);text-align:right}
+.counts li.sep{border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+.bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--bg);margin:10px 0 4px}
+.bar div{height:100%;transition:width .25s}
+.ratios{font-size:12px;color:var(--muted)}
+.ratios p{margin:2px 0}
+
+.tablewrap{overflow:auto;max-height:340px;border:1px solid var(--line);border-radius:7px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:5px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-weight:500;color:var(--muted);position:sticky;top:0;background:var(--panel)}
+th:nth-child(2),td:nth-child(2){text-align:left;max-width:96px;overflow:hidden;text-overflow:ellipsis}
+#resTable tbody tr{cursor:pointer}
+#resTable tbody tr:hover{background:var(--soft)}
+#resTable tr.on{background:var(--soft)}
+tfoot td{font-weight:700;border-bottom:0;position:sticky;bottom:0;background:var(--panel)}
+.stt{font-size:11px;padding:0 6px;border-radius:999px;background:var(--bg);color:var(--muted)}
+.stt.done{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.stt.run{background:var(--soft);color:var(--accent)}
+.stt.error{color:var(--danger)}
+
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);padding:18px;width:min(520px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog h3{margin:0 0 8px;font-size:15px}
+dialog p{margin:0 0 10px;font-size:13px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1><span class="dots" aria-hidden="true"><i style="background:var(--c-dapi)"></i><i style="background:var(--c-red)"></i><i style="background:var(--c-green)"></i></span>核カウンター（一括処理版）</h1>
+  <p>DAPI・赤・緑のフォルダを選ぶと、ファイル名順に組み合わせて核の数と赤・緑ドットの共発現を判定します。画像はこの端末の中だけで処理され、外部には送信されません。</p>
+</header>
+
+<main class="layout">
+  <aside class="controls">
+    <section class="step">
+      <h2><span class="n">1</span>フォルダを選ぶ</h2>
+      <div class="slots">
+        <div class="slot" data-ch="dapi"><i class="chip" style="background:var(--c-dapi)"></i><div class="meta"><b>DAPI（青・核）</b><span>未選択</span></div><button class="btn small" type="button">フォルダを選択</button><input type="file" hidden webkitdirectory directory multiple></div>
+        <div class="slot" data-ch="red"><i class="chip" style="background:var(--c-red)"></i><div class="meta"><b>赤</b><span>未選択</span></div><button class="btn small" type="button">フォルダを選択</button><input type="file" hidden webkitdirectory directory multiple></div>
+        <div class="slot" data-ch="green"><i class="chip" style="background:var(--c-green)"></i><div class="meta"><b>緑</b><span>未選択</span></div><button class="btn small" type="button">フォルダを選択</button><input type="file" hidden webkitdirectory directory multiple></div>
+      </div>
+      <p class="hint">各フォルダの画像をファイル名順（数字は数値順）に並べ、上から同じ順番どうしを1組にします。TIFF（8／16ビット）、PNG、JPEGに対応。パソコンのChromeまたはEdgeでの利用をおすすめします。</p>
+      <p class="warn" id="pairWarn" hidden></p>
+      <div class="pairs" id="pairs" hidden>
+        <table><thead><tr><th>#</th><th>DAPI</th><th>赤</th><th>緑</th></tr></thead><tbody></tbody></table>
+      </div>
+      <p class="hint" id="pairHint" hidden>行をクリックすると、その組をプレビューできます。</p>
+      <div class="row-btns"><button class="btn" id="sampleBtn" type="button">サンプル（4組）で試す</button></div>
+    </section>
+
+    <section class="step">
+      <h2><span class="n">2</span>進め方を選ぶ</h2>
+      <fieldset id="modeFs">
+        <div class="seg" role="radiogroup" aria-label="進め方">
+          <label><input type="radio" name="runmode" value="auto" checked>自動で一括処理</label>
+          <label><input type="radio" name="runmode" value="manual">1枚ずつ確認</label>
+        </div>
+        <div id="autoOpts">
+          <p class="sub" style="margin-top:8px">下の設定で、すべての組を止まらずに処理します。</p>
+          <label class="check"><input type="radio" name="thrmode" value="auto" checked><span>閾値（DAPI・赤ドット・緑ドット）は画像ごとに自動計算する</span></label>
+          <label class="check"><input type="radio" name="thrmode" value="fixed"><span>閾値は下の設定値で全画像を固定する</span></label>
+        </div>
+        <div id="manualOpts" hidden>
+          <p class="sub" style="margin-top:8px">1組ずつ表示します。閾値などを調整し、間違った核を除外してから「確定して次へ」で進みます。</p>
+          <label class="check"><input type="checkbox" id="carry" checked><span>前の画像で決めた設定を次の画像に引き継ぐ（オフにすると毎回自動計算から始めます）</span></label>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="step">
+      <h2><span class="n">3</span>設定</h2>
+      <fieldset id="setFs">
+        <p class="sub-h"><i style="background:var(--c-dapi)"></i>核の検出（DAPI）</p>
+        <div class="field">
+          <div class="lbl"><span>ぼかし（ノイズ除去）</span><output id="o_sigma"></output></div>
+          <input type="range" id="sigma" min="0" max="4" step="0.5" value="1">
+        </div>
+        <div class="field">
+          <div class="lbl"><span>DAPIの閾値</span><output id="o_tD"></output></div>
+          <div class="ctl"><input type="range" id="tD" min="0" max="254" step="1" value="40"><button class="btn small" type="button" data-auto="tD">自動</button></div>
+        </div>
+        <label class="check"><input type="checkbox" id="fill" checked><span>核の内側の暗い穴を埋める</span></label>
+        <label class="check"><input type="checkbox" id="split" checked><span>くっついた核を分ける</span></label>
+        <div class="field" id="splitField">
+          <div class="lbl"><span>分割の目安（核の半径）</span><output id="o_splitR"></output></div>
+          <input type="range" id="splitR" min="2" max="40" step="1" value="6">
+        </div>
+        <div class="field">
+          <div class="lbl"><span>核として数える大きさ（面積, px²）</span></div>
+          <div class="pair">
+            <div><label for="minA">最小</label><input type="number" id="minA" min="0" value="30"></div>
+            <div><label for="maxA">最大</label><input type="number" id="maxA" min="1" value="5000"></div>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" id="edge"><span>画像の端に接する核を除く</span></label>
+
+        <p class="sub-h"><i style="background:var(--c-red)"></i>赤のドット</p>
+        <label class="check"><input type="checkbox" id="bgR" checked><span>背景を差し引く</span></label>
+        <div class="field" id="bgRField">
+          <div class="lbl"><span>背景とみなす大きさ</span><output id="o_bgRad"></output></div>
+          <input type="range" id="bgRad" min="2" max="30" step="1" value="5">
+        </div>
+        <div class="field">
+          <div class="lbl"><span>ドットの明るさの閾値</span><output id="o_tDot"></output></div>
+          <div class="ctl"><input type="range" id="tDot" min="1" max="150" step="1" value="20"><button class="btn small" type="button" data-auto="tDot">自動</button></div>
+        </div>
+        <div class="field">
+          <div class="lbl"><span>陽性とみなすドットの数</span><output id="o_minDots"></output></div>
+          <input type="range" id="minDots" min="1" max="20" step="1" value="2">
+        </div>
+
+        <p class="sub-h"><i style="background:var(--c-green)"></i>緑のドット</p>
+        <label class="check"><input type="checkbox" id="bgG" checked><span>背景を差し引く</span></label>
+        <div class="field" id="bgGField">
+          <div class="lbl"><span>背景とみなす大きさ</span><output id="o_bgRadG"></output></div>
+          <input type="range" id="bgRadG" min="2" max="30" step="1" value="5">
+        </div>
+        <div class="field">
+          <div class="lbl"><span>ドットの明るさの閾値</span><output id="o_tDotG"></output></div>
+          <div class="ctl"><input type="range" id="tDotG" min="1" max="150" step="1" value="20"><button class="btn small" type="button" data-auto="tDotG">自動</button></div>
+        </div>
+        <div class="field">
+          <div class="lbl"><span>陽性とみなすドットの数</span><output id="o_minDotsG"></output></div>
+          <input type="range" id="minDotsG" min="1" max="20" step="1" value="2">
+        </div>
+
+        <p class="sub-h">判定範囲</p>
+        <div class="field">
+          <div class="lbl"><span>核の外側へ広げる幅</span><output id="o_expand"></output></div>
+          <input type="range" id="expand" min="0" max="12" step="1" value="0">
+          <p class="sub">ドットが核の周辺（細胞質）にも出る場合に数px広げます。</p>
+        </div>
+      </fieldset>
+    </section>
+  </aside>
+
+  <section class="viewer">
+    <div class="vhead"><span class="name" id="curName">画像が選ばれていません</span><span class="badge" id="curBadge" hidden></span></div>
+    <div class="actbar" id="actbar" hidden>
+      <span class="t" id="actText"></span>
+      <button class="btn" type="button" id="skipBtn">スキップ</button>
+      <button class="btn ghost" type="button" id="endBtn">ここで終了</button>
+      <button class="btn primary" type="button" id="nextBtn">確定して次へ</button>
+    </div>
+    <div class="toolbar">
+      <label class="tog"><input type="checkbox" id="vD" checked><i style="background:var(--c-dapi)"></i>DAPI</label>
+      <label class="tog"><input type="checkbox" id="vR" checked><i style="background:var(--c-red)"></i>赤</label>
+      <label class="tog"><input type="checkbox" id="vG" checked><i style="background:var(--c-green)"></i>緑</label>
+      <label class="tog"><input type="checkbox" id="vO" checked><i style="background:var(--c-both)"></i>判定の輪郭</label>
+      <label class="tog"><input type="checkbox" id="vDot" checked><i style="background:#FFFFFF;box-shadow:0 0 0 1px var(--muted)"></i>ドット（白＝赤・水色＝緑）</label>
+      <label class="tog"><input type="checkbox" id="vN"><i style="background:var(--ink)"></i>核の番号</label>
+      <label class="tog"><input type="checkbox" id="vBg"><i style="background:var(--c-both)"></i>背景除去後で表示</label>
+      <span class="grow"></span>
+      <label class="inline">明るさ<input type="range" id="gain" min="0.5" max="4" step="0.1" value="1.2"></label>
+      <label class="inline">表示<select id="zoom"><option value="fit">全体</option><option value="1">100%</option><option value="2">200%</option><option value="4">400%</option></select></label>
+    </div>
+    <div class="stage fit" id="stage">
+      <div class="empty" id="empty">
+        <div class="ring" aria-hidden="true"><span style="background:#3D5BFF;left:20px;top:0"></span><span style="background:#E5484D;left:0;top:34px"></span><span style="background:#2FA866;left:40px;top:34px"></span></div>
+        <p>左でDAPI・赤・緑のフォルダを選ぶと、最初の組がここにプレビューされます。</p>
+        <button class="btn primary" type="button" id="sampleBtn2">サンプル（4組）で試す</button>
+      </div>
+      <canvas id="cv" hidden></canvas>
+      <div class="busy" id="busy">解析中…</div>
+    </div>
+    <div class="info" id="info"></div>
+  </section>
+
+  <aside class="results">
+    <section>
+      <h2>実行</h2>
+      <button class="btn primary wide" id="startBtn" type="button" disabled>解析を開始</button>
+      <div class="row-btns" id="stopRow" hidden><button class="btn danger" id="stopBtn" type="button">中止する</button></div>
+      <div class="prog" id="prog" hidden>
+        <div class="ptext"><span id="progText"></span><span id="progPct"></span></div>
+        <div class="pbar"><div id="progBar"></div></div>
+      </div>
+      <p class="msg" id="runMsg"></p>
+    </section>
+
+    <section>
+      <h2>表示中の画像</h2>
+      <div class="total"><strong id="nTotal">–</strong><span>個の核（DAPI）</span></div>
+      <ul class="counts">
+        <li><i style="background:var(--c-red)"></i><span>赤 陽性</span><b id="nRed">–</b><em id="pRed"></em></li>
+        <li><i style="background:var(--c-green)"></i><span>緑 陽性</span><b id="nGreen">–</b><em id="pGreen"></em></li>
+        <li class="sep"><i style="background:var(--c-both)"></i><span>赤＋緑 共陽性</span><b id="nBoth">–</b><em id="pBoth"></em></li>
+        <li><i style="background:var(--c-red);opacity:.55"></i><span>赤のみ</span><b id="nRO">–</b><em id="pRO"></em></li>
+        <li><i style="background:var(--c-green);opacity:.55"></i><span>緑のみ</span><b id="nGO">–</b><em id="pGO"></em></li>
+        <li><i style="background:var(--c-neg)"></i><span>どちらも陰性</span><b id="nNeg">–</b><em id="pNeg"></em></li>
+      </ul>
+      <div class="bar" id="bar" aria-hidden="true"><div style="background:var(--c-both)"></div><div style="background:var(--c-red)"></div><div style="background:var(--c-green)"></div><div style="background:var(--c-neg)"></div></div>
+      <div class="ratios" id="ratios"></div>
+    </section>
+
+    <section>
+      <h2>全画像の結果</h2>
+      <p class="sub" id="noRes">解析を開始すると、ここに1組ずつ結果が並びます。</p>
+      <div class="tablewrap" id="resWrap" hidden><table id="resTable">
+        <thead><tr><th>#</th><th>画像</th><th>核</th><th>赤+</th><th>緑+</th><th>共陽性</th><th>率</th><th>状態</th></tr></thead>
+        <tbody></tbody><tfoot></tfoot>
+      </table></div>
+      <p class="sub" id="resHint" hidden>完了した行をクリックすると、その画像の判定を確認・修正できます。</p>
+      <div class="row-btns"><button class="btn primary" id="saveBtn" type="button" disabled>結果をZIPで保存</button></div>
+      <p class="sub">新しいフォルダ「results_日付_時刻」の中に、核ごとのデータ（nuclei_data）と判定画像（元の画像：overlay_images、背景除去後：overlay_images_bgsub）、全体の集計（summary.csv）、設定の記録（settings.txt）を保存します。これらは1つのZIPファイルにまとめて保存され、展開するとこのフォルダ構成になります。</p>
+      <p class="msg" id="saveMsg"></p>
+    </section>
+  </aside>
+</main>
+
+<dialog id="dlg">
+  <h3 id="dlgTitle"></h3>
+  <p id="dlgText"></p>
+  <div class="row-btns"><button class="btn" id="dlgNo" type="button">キャンセル</button><button class="btn primary" id="dlgYes" type="button">OK</button></div>
+</dialog>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const CH = ['dapi','red','green'];
+const CH_JA = {dapi:'DAPI',red:'赤',green:'緑'};
+const CLASS_NAME = ['陰性','赤のみ','緑のみ','共陽性'];
+const CLASS_EN = ['negative','red_only','green_only','double'];
+const CLASS_RGB = [[150,160,175],[255,70,70],[60,220,120],[255,214,0]];
+const IMG_RE = /\.(tif|tiff|png|jpe?g|bmp)$/i;
+
+const st = {
+  folders:{dapi:[],red:[],green:[]}, sets:[], status:[], results:[], errors:[],
+  ch:{dapi:null,red:null,green:null}, w:0, h:0, blurSigma:-1, dapiBlur:null, src:{},
+  res:null, excluded:new Set(), selected:0,
+  running:false, stop:false, mode:'auto', cur:-1, shown:-1, loadToken:0
+};
+
+let dl = null;
+(async () => { try { if (window.claude && window.claude.use) dl = await window.claude.use('downloads'); } catch (e) { dl = null; } })();
+
+/* ---------- image decoding ---------- */
+async function decodeFile(file){
+  const buf = await file.arrayBuffer();
+  const b = new Uint8Array(buf);
+  const isTiff = (b[0]===0x49&&b[1]===0x49&&b[2]===42) || (b[0]===0x4D&&b[1]===0x4D&&b[3]===42);
+  if (isTiff) return decodeTiff(buf, b[0]===0x49);
+  const bmp = await createImageBitmap(new Blob([buf]));
+  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+  const ctx = c.getContext('2d'); ctx.drawImage(bmp,0,0);
+  const d = ctx.getImageData(0,0,c.width,c.height).data;
+  const n = c.width*c.height, raw = new Float32Array(n);
+  for (let i=0;i<n;i++){ const r=d[i*4],g=d[i*4+1],bb=d[i*4+2]; raw[i] = r>g?(r>bb?r:bb):(g>bb?g:bb); }
+  return {w:c.width,h:c.height,raw};
+}
+function roughness(get, w, h){
+  let s=0, c=0; const stepY=Math.max(1,Math.floor(h/200)), stepX=Math.max(1,Math.floor(w/200));
+  for (let y=0;y<h;y+=stepY) for (let x=0;x<w-1;x+=stepX){ s+=Math.abs(get(y*w+x)-get(y*w+x+1)); c++; }
+  return s/Math.max(1,c);
+}
+function decodeTiff(buf, le){
+  if (typeof UTIF === 'undefined') throw new Error('TIFFの読み込み部品を読み込めませんでした。PNGで保存し直して試してください。');
+  const ifds = UTIF.decode(buf);
+  if (!ifds.length) throw new Error('TIFFの中に画像が見つかりませんでした。');
+  const ifd = ifds[0];
+  UTIF.decodeImage(buf, ifd, ifds);
+  const w = ifd.width, h = ifd.height, n = w*h;
+  const bps = ifd.t258 ? ifd.t258[0] : 1, spp = ifd.t277 ? ifd.t277[0] : 1, fmt = ifd.t339 ? ifd.t339[0] : 1;
+  const data = ifd.data, raw = new Float32Array(n);
+  if (spp===1 && (bps===8||bps===16||bps===32) && data && data.length >= n*bps/8){
+    if (bps===8){ for (let i=0;i<n;i++) raw[i]=data[i]; }
+    else {
+      const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      if (bps===16){
+        // decide byte order by which reading gives the smoother image
+        const rLE = roughness(i=>dv.getUint16(i*2,true),w,h), rBE = roughness(i=>dv.getUint16(i*2,false),w,h);
+        const useLE = rLE <= rBE;
+        for (let i=0;i<n;i++) raw[i]=dv.getUint16(i*2,useLE);
+      } else if (fmt===3){
+        for (let i=0;i<n;i++){ const v=dv.getFloat32(i*4,le); raw[i]=isFinite(v)?v:0; }
+      } else { for (let i=0;i<n;i++) raw[i]=dv.getUint32(i*4,le); }
+    }
+  } else {
+    const rgba = UTIF.toRGBA8(ifd);
+    for (let i=0;i<n;i++){ const r=rgba[i*4],g=rgba[i*4+1],bb=rgba[i*4+2]; raw[i]=Math.max(r,g,bb); }
+  }
+  return {w,h,raw};
+}
+function normalize(raw){
+  const n = raw.length, step = Math.max(1, Math.floor(n/250000)), s = [];
+  for (let i=0;i<n;i+=step) s.push(raw[i]);
+  s.sort((a,b)=>a-b);
+  const lo = s[Math.floor(s.length*0.001)];
+  let hi = s[Math.min(s.length-1, Math.floor(s.length*0.9995))];
+  if (hi <= lo) hi = s[s.length-1];
+  const span = (hi-lo) || 1, out = new Float32Array(n);
+  for (let i=0;i<n;i++){ const v=(raw[i]-lo)/span*255; out[i]= v<0?0:(v>255?255:v); }
+  return out;
+}
+
+/* ---------- image processing ---------- */
+function gaussBlur(src,w,h,sigma){
+  if (sigma<=0) return src;
+  const r = Math.ceil(sigma*2.5), k = new Float32Array(2*r+1); let sum=0;
+  for (let i=-r;i<=r;i++){ k[i+r]=Math.exp(-(i*i)/(2*sigma*sigma)); sum+=k[i+r]; }
+  for (let i=0;i<k.length;i++) k[i]/=sum;
+  const tmp = new Float32Array(w*h), out = new Float32Array(w*h);
+  for (let y=0;y<h;y++){ const o=y*w; for (let x=0;x<w;x++){ let a=0; for (let j=-r;j<=r;j++){ let xx=x+j; if(xx<0)xx=0; else if(xx>=w)xx=w-1; a+=src[o+xx]*k[j+r]; } tmp[o+x]=a; } }
+  for (let y=0;y<h;y++){ for (let x=0;x<w;x++){ let a=0; for (let j=-r;j<=r;j++){ let yy=y+j; if(yy<0)yy=0; else if(yy>=h)yy=h-1; a+=tmp[yy*w+x]*k[j+r]; } out[y*w+x]=a; } }
+  return out;
+}
+function otsu(arr){
+  const hist = new Float64Array(256);
+  for (let i=0;i<arr.length;i++){ let v=arr[i]|0; if(v>255)v=255; hist[v]++; }
+  const total = arr.length; let sumAll=0; for (let t=0;t<256;t++) sumAll+=t*hist[t];
+  let wB=0,sumB=0,best=0,bestT=0;
+  for (let t=0;t<256;t++){
+    wB+=hist[t]; if(!wB) continue; const wF=total-wB; if(!wF) break;
+    sumB+=t*hist[t]; const mB=sumB/wB, mF=(sumAll-sumB)/wF, between=wB*wF*(mB-mF)*(mB-mF);
+    if (between>best){best=between;bestT=t;}
+  }
+  return Math.min(254, bestT);
+}
+function fillHoles(mask,w,h){
+  const n=w*h, vis=new Uint8Array(n), stack=new Int32Array(n); let sp=0;
+  const push=i=>{ if(!mask[i]&&!vis[i]){vis[i]=1;stack[sp++]=i;} };
+  for (let x=0;x<w;x++){ push(x); push((h-1)*w+x); }
+  for (let y=0;y<h;y++){ push(y*w); push(y*w+w-1); }
+  while(sp){ const i=stack[--sp], x=i%w; if(x>0)push(i-1); if(x<w-1)push(i+1); if(i>=w)push(i-w); if(i<n-w)push(i+w); }
+  for (let i=0;i<n;i++) if(!mask[i]&&!vis[i]) mask[i]=1;
+}
+function labelCC(mask,w,h,eight){
+  const n=w*h, lab=new Int32Array(n), stack=new Int32Array(n); let count=0;
+  for (let s=0;s<n;s++){
+    if(!mask[s]||lab[s]) continue;
+    count++; let sp=0; stack[sp++]=s; lab[s]=count;
+    while(sp){
+      const i=stack[--sp], x=i%w, y=(i-x)/w;
+      for (let dy=-1;dy<=1;dy++){ const yy=y+dy; if(yy<0||yy>=h) continue;
+        for (let dx=-1;dx<=1;dx++){ if(!dx&&!dy) continue; if(!eight&&dx&&dy) continue; const xx=x+dx; if(xx<0||xx>=w) continue;
+          const j=yy*w+xx; if(mask[j]&&!lab[j]){lab[j]=count;stack[sp++]=j;} } }
+    }
+  }
+  return {lab,count};
+}
+function distTransform(mask,w,h){
+  const n=w*h, INF=1e9, S=Math.SQRT2, d=new Float32Array(n);
+  for (let i=0;i<n;i++) d[i]=mask[i]?INF:0;
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++){ const i=y*w+x; if(!d[i]) continue; let v=d[i];
+    if(x>0&&d[i-1]+1<v)v=d[i-1]+1;
+    if(y>0){ if(d[i-w]+1<v)v=d[i-w]+1; if(x>0&&d[i-w-1]+S<v)v=d[i-w-1]+S; if(x<w-1&&d[i-w+1]+S<v)v=d[i-w+1]+S; }
+    d[i]=v; }
+  for (let y=h-1;y>=0;y--) for (let x=w-1;x>=0;x--){ const i=y*w+x; if(!d[i]) continue; let v=d[i];
+    if(x<w-1&&d[i+1]+1<v)v=d[i+1]+1;
+    if(y<h-1){ if(d[i+w]+1<v)v=d[i+w]+1; if(x<w-1&&d[i+w+1]+S<v)v=d[i+w+1]+S; if(x>0&&d[i+w-1]+S<v)v=d[i+w-1]+S; }
+    d[i]=v; }
+  for (let i=0;i<n;i++) if(d[i]>=INF/2) d[i]=Math.max(w,h);
+  return d;
+}
+function maxFilter(src,w,h,r){
+  const tmp=new Float32Array(w*h), out=new Float32Array(w*h);
+  for (let y=0;y<h;y++){ const o=y*w; for (let x=0;x<w;x++){ let m=-1; const a=Math.max(0,x-r), b=Math.min(w-1,x+r); for(let k=a;k<=b;k++){const v=src[o+k]; if(v>m)m=v;} tmp[o+x]=m; } }
+  for (let x=0;x<w;x++){ for (let y=0;y<h;y++){ let m=-1; const a=Math.max(0,y-r), b=Math.min(h-1,y+r); for(let k=a;k<=b;k++){const v=tmp[k*w+x]; if(v>m)m=v;} out[y*w+x]=m; } }
+  return out;
+}
+function minFilter(src,w,h,r){
+  const tmp=new Float32Array(w*h), out=new Float32Array(w*h);
+  for (let y=0;y<h;y++){ const o=y*w; for (let x=0;x<w;x++){ let m=Infinity; const a=Math.max(0,x-r), b=Math.min(w-1,x+r); for(let k=a;k<=b;k++){const v=src[o+k]; if(v<m)m=v;} tmp[o+x]=m; } }
+  for (let x=0;x<w;x++){ for (let y=0;y<h;y++){ let m=Infinity; const a=Math.max(0,y-r), b=Math.min(h-1,y+r); for(let k=a;k<=b;k++){const v=tmp[k*w+x]; if(v<m)m=v;} out[y*w+x]=m; } }
+  return out;
+}
+// white top-hat: removes anything broader than r (uneven / high background), keeps small dots
+function topHat(src,w,h,r){
+  const op=maxFilter(minFilter(src,w,h,r),w,h,r), out=new Float32Array(w*h);
+  for (let i=0;i<w*h;i++){ const v=src[i]-op[i]; out[i]=v>0?v:0; }
+  return out;
+}
+// background level + 6 x robust SD (median / MAD)
+function robustAuto(arr){
+  const n=arr.length, step=Math.max(1,Math.floor(n/200000)), s=[];
+  for (let i=0;i<n;i+=step) s.push(arr[i]);
+  s.sort((a,b)=>a-b); const med=s[s.length>>1];
+  const dev=s.map(v=>Math.abs(v-med)).sort((a,b)=>a-b); const mad=Math.max(0.5,dev[dev.length>>1]);
+  return Math.max(1,Math.min(150,Math.round(med+6*1.4826*mad)));
+}
+function findDots(src,w,h,t){
+  const dots=[];
+  for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++){
+    const i=y*w+x, v=src[i]; if(v<=t) continue;
+    if(v<src[i-1]||v<src[i-w-1]||v<src[i-w]||v<src[i-w+1]) continue;
+    if(v<=src[i+1]||v<=src[i+w-1]||v<=src[i+w]||v<=src[i+w+1]) continue;
+    dots.push(i);
+  }
+  return dots;
+}
+class Heap{
+  constructor(cap){this.k=new Float32Array(cap);this.v=new Int32Array(cap);this.n=0;}
+  push(v,k){const K=this.k,V=this.v;let i=this.n++;while(i>0){const p=(i-1)>>1;if(K[p]>=k)break;K[i]=K[p];V[i]=V[p];i=p;}K[i]=k;V[i]=v;}
+  pop(){const K=this.k,V=this.v,top=V[0],n=--this.n;if(n>0){const k=K[n],v=V[n];let i=0;for(;;){let c=2*i+1;if(c>=n)break;if(c+1<n&&K[c+1]>K[c])c++;if(K[c]<=k)break;K[i]=K[c];V[i]=V[c];i=c;}K[i]=k;V[i]=v;}return top;}
+}
+function watershed(mask,w,h,r){
+  const n=w*h;
+  const d = gaussBlur(distTransform(mask,w,h), w, h, 1);
+  const mf = maxFilter(d,w,h,r);
+  const peak = new Uint8Array(n);
+  for (let i=0;i<n;i++) if(mask[i] && d[i]>=mf[i]-1e-4 && d[i]>=1.5) peak[i]=1;
+  const {lab} = labelCC(peak,w,h,true);
+  const heap = new Heap(n);
+  for (let i=0;i<n;i++) if(lab[i]) heap.push(i,d[i]);
+  while(heap.n){
+    const i=heap.pop(), l=lab[i], x=i%w;
+    if(x>0&&mask[i-1]&&!lab[i-1]){lab[i-1]=l;heap.push(i-1,d[i-1]);}
+    if(x<w-1&&mask[i+1]&&!lab[i+1]){lab[i+1]=l;heap.push(i+1,d[i+1]);}
+    if(i>=w&&mask[i-w]&&!lab[i-w]){lab[i-w]=l;heap.push(i-w,d[i-w]);}
+    if(i<n-w&&mask[i+w]&&!lab[i+w]){lab[i+w]=l;heap.push(i+w,d[i+w]);}
+  }
+  // any foreground blob that got no marker (very small) gets its own label
+  let max=0; for (let i=0;i<n;i++) if(lab[i]>max) max=lab[i];
+  const rest=new Uint8Array(n); let any=false;
+  for (let i=0;i<n;i++) if(mask[i]&&!lab[i]){rest[i]=1;any=true;}
+  if (any){ const r2=labelCC(rest,w,h,false); for(let i=0;i<n;i++) if(r2.lab[i]) lab[i]=max+r2.lab[i]; }
+  return lab;
+}
+function expandLabels(lab,w,h,steps){
+  if(!steps) return lab;
+  let cur=lab; const n=w*h;
+  for (let s=0;s<steps;s++){
+    const next=cur.slice();
+    for (let i=0;i<n;i++){ if(cur[i]) continue; const x=i%w; let l=0;
+      if(x>0&&cur[i-1])l=cur[i-1]; else if(x<w-1&&cur[i+1])l=cur[i+1]; else if(i>=w&&cur[i-w])l=cur[i-w]; else if(i<n-w&&cur[i+w])l=cur[i+w];
+      if(l) next[i]=l; }
+    cur=next;
+  }
+  return cur;
+}
+
+
+
+function makeSample(seed0){
+  let seed=seed0; const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+  const gauss=()=>{let u=0,v=0;while(!u)u=rnd();while(!v)v=rnd();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);};
+  const w=720,h=520,n=w*h, D=new Float32Array(n), R=new Float32Array(n), G=new Float32Array(n);
+  const cells=[];
+  for (let t=0;t<4000&&cells.length<85;t++){
+    const rx=8+rnd()*6, ry=7+rnd()*5, cx=10+rnd()*(w-20), cy=10+rnd()*(h-20);
+    let ok=true; for(const c of cells){ const dd=Math.hypot(c.cx-cx,c.cy-cy); if(dd<0.78*(Math.max(rx,ry)+Math.max(c.rx,c.ry))){ok=false;break;} }
+    if(!ok) continue;
+    const u=rnd(); const cls = u<0.24?3:u<0.42?1:u<0.56?2:0;
+    cells.push({cx,cy,rx,ry,a:rnd()*Math.PI,amp:130+rnd()*90,cls,ra:120+rnd()*100,ga:120+rnd()*100});
+  }
+  for (const c of cells){
+    const R0=Math.ceil(Math.max(c.rx,c.ry)*1.9), co=Math.cos(c.a), si=Math.sin(c.a);
+    for (let y=Math.max(0,Math.floor(c.cy-R0));y<Math.min(h,c.cy+R0);y++) for (let x=Math.max(0,Math.floor(c.cx-R0));x<Math.min(w,c.cx+R0);x++){
+      const dx=x-c.cx, dy=y-c.cy, u=(dx*co+dy*si)/c.rx, v=(-dx*si+dy*co)/c.ry, q=u*u+v*v, i=y*w+x;
+      const f = q<1 ? 1-0.22*q+0.08*Math.sin(x*0.9)*Math.cos(y*0.7) : Math.exp(-(q-1)*7)*0.78;
+      D[i]=Math.max(D[i],c.amp*f);
+      const fs = q<1.35 ? 0.9+0.1*Math.sin(x*1.3+y) : Math.exp(-(q-1.35)*3);
+      R[i]=Math.max(R[i],45*Math.exp(-q/3));
+      G[i]=Math.max(G[i],35*Math.exp(-q/3));
+    }
+  }
+  const spot=(A,sx,sy,amp)=>{ for(let y=Math.max(0,Math.floor(sy-4));y<=Math.min(h-1,sy+4);y++) for(let x=Math.max(0,Math.floor(sx-4));x<=Math.min(w-1,sx+4);x++){ const dd=(x-sx)*(x-sx)+(y-sy)*(y-sy); A[y*w+x]+=amp*Math.exp(-dd/3.4); } };
+  for (const c of cells){
+    const co=Math.cos(c.a), si=Math.sin(c.a);
+    for (const [A,bit] of [[R,1],[G,2]]){
+      const k=(c.cls&bit)?2+Math.floor(rnd()*5):(rnd()<0.3?1:0);
+      for (let j=0;j<k;j++){ const ang=rnd()*2*Math.PI, rr=Math.sqrt(rnd())*0.75, u=rr*Math.cos(ang)*c.rx, v=rr*Math.sin(ang)*c.ry; spot(A, c.cx+u*co-v*si, c.cy+u*si+v*co, 80+rnd()*80); }
+    }
+  }
+  for (let j=0;j<30;j++){ spot(R, rnd()*w, rnd()*h, 60+rnd()*60); spot(G, rnd()*w, rnd()*h, 60+rnd()*60); }
+  for (let i=0;i<n;i++){ D[i]=Math.max(0,D[i]+12+gauss()*7); R[i]=Math.max(0,R[i]+30+45*((i%w)/w)+25*Math.sin(((i/w)|0)/h*3.2)+gauss()*8); G[i]=Math.max(0,G[i]+25+40*(((i/w)|0)/h)+20*Math.cos((i%w)/w*4)+gauss()*8); }
+  return {w,h,D,R,G};
+}
+
+
+/* ---------- parameters ---------- */
+const PARAM_IDS=['sigma','tD','fill','split','splitR','minA','maxA','edge','expand','bgR','bgRad','tDot','minDots','bgG','bgRadG','tDotG','minDotsG'];
+function P(){
+  return { sigma:+$('#sigma').value, tD:+$('#tD').value, fill:$('#fill').checked, split:$('#split').checked,
+    splitR:+$('#splitR').value, minA:Math.max(0,+$('#minA').value||0), maxA:Math.max(1,+$('#maxA').value||1e9),
+    edge:$('#edge').checked, expand:+$('#expand').value,
+    bgR:$('#bgR').checked, bgRad:+$('#bgRad').value, tDot:+$('#tDot').value, minDots:+$('#minDots').value,
+    bgG:$('#bgG').checked, bgRadG:+$('#bgRadG').value, tDotG:+$('#tDotG').value, minDotsG:+$('#minDotsG').value };
+}
+const fmt={sigma:v=>v, tD:v=>v, splitR:v=>v+' px', expand:v=>v+' px', bgRad:v=>v+' px', tDot:v=>v, minDots:v=>v+'個以上', bgRadG:v=>v+' px', tDotG:v=>v, minDotsG:v=>v+'個以上'};
+function updateOutputs(){
+  for (const id in fmt) $('#o_'+id).textContent=fmt[id]($('#'+id).value);
+  $('#splitField').style.opacity=$('#split').checked?1:.45;
+  $('#bgRField').style.opacity=$('#bgR').checked?1:.45;
+  $('#bgGField').style.opacity=$('#bgG').checked?1:.45;
+}
+function setParams(p){
+  for (const k of PARAM_IDS){ const el=$('#'+k); if(!el||p[k]===undefined) continue; if(el.type==='checkbox') el.checked=p[k]; else el.value=p[k]; }
+  updateOutputs();
+}
+function setVal(id,v){ $('#'+id).value=v; updateOutputs(); }
+const runMode=()=>document.querySelector('input[name=runmode]:checked').value;
+const thrMode=()=>document.querySelector('input[name=thrmode]:checked').value;
+
+/* ---------- analysis ---------- */
+function getBlur(sigma){
+  if (st.blurSigma!==sigma){ st.dapiBlur=gaussBlur(st.ch.dapi.norm,st.w,st.h,sigma); st.blurSigma=sigma; }
+  return st.dapiBlur;
+}
+function getSrc(ch,p){
+  const C=st.ch[ch]; if(!C) return null;
+  const bg = ch==='red'?p.bgR:p.bgG, rad = ch==='red'?p.bgRad:p.bgRadG, key=bg+':'+rad;
+  const c=st.src[ch]; if (c && c.key===key) return c.arr;
+  const sm=gaussBlur(C.norm,st.w,st.h,1), arr = bg ? topHat(sm,st.w,st.h,rad) : sm;
+  st.src[ch]={key,arr}; return arr;
+}
+function autoThresholds(){
+  const p=P();
+  setVal('tD',otsu(getBlur(p.sigma)));
+  if (st.ch.red) setVal('tDot',robustAuto(getSrc('red',p)));
+  if (st.ch.green) setVal('tDotG',robustAuto(getSrc('green',p)));
+}
+function analyze(){
+  const p=P(), w=st.w, h=st.h, n=w*h;
+  const B=getBlur(p.sigma), mask=new Uint8Array(n);
+  for (let i=0;i<n;i++) if(B[i]>p.tD) mask[i]=1;
+  if (p.fill) fillHoles(mask,w,h);
+  const lab = p.split ? watershed(mask,w,h,p.splitR) : labelCC(mask,w,h,false).lab;
+  let maxL=0; for (let i=0;i<n;i++) if(lab[i]>maxL) maxL=lab[i];
+  const area=new Int32Array(maxL+1), edge=new Uint8Array(maxL+1);
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++){ const l=lab[y*w+x]; if(!l) continue; area[l]++; if(x===0||y===0||x===w-1||y===h-1) edge[l]=1; }
+  const map=new Int32Array(maxL+1); let N=0;
+  for (let l=1;l<=maxL;l++){ if(area[l]<p.minA||area[l]>p.maxA) continue; if(p.edge&&edge[l]) continue; map[l]=++N; }
+  const nuc=new Int32Array(n); for (let i=0;i<n;i++) if(lab[i]) nuc[i]=map[lab[i]];
+  const meas=expandLabels(nuc,w,h,p.expand);
+  const A=new Float64Array(N+1), SX=new Float64Array(N+1), SY=new Float64Array(N+1), SD=new Float64Array(N+1);
+  const D=st.ch.dapi.norm;
+  for (let i=0;i<n;i++){ const l=nuc[i]; if(l){ A[l]++; SX[l]+=i%w; SY[l]+=(i/w)|0; SD[l]+=D[i]; } }
+  const R=getSrc('red',p), G=getSrc('green',p);
+  const DC=new Int32Array(N+1), GC=new Int32Array(N+1);
+  const dots = R ? findDots(R,w,h,p.tDot) : [], gdots = G ? findDots(G,w,h,p.tDotG) : [];
+  for (const i of dots){ const m=meas[i]; if(m) DC[m]++; }
+  for (const i of gdots){ const m=meas[i]; if(m) GC[m]++; }
+  const cells=[];
+  for (let l=1;l<=N;l++){
+    const rp=!!R && DC[l]>=p.minDots, gp=!!G && GC[l]>=p.minDotsG;
+    cells.push({id:l, x:SX[l]/A[l], y:SY[l]/A[l], area:A[l], dapi:SD[l]/A[l], dots:DC[l], gdots:GC[l], rp, gp, cls:(rp?1:0)+(gp?2:0)});
+  }
+  st.res={nuc, meas, dots, gdots, cells, hasR:!!R, hasG:!!G, params:p};
+  st.excluded=new Set(); st.selected=0;
+}
+function refresh(){ render(); renderSummary(); renderInfo(); }
+let timer=0;
+function schedule(){
+  if (!st.ch.dapi || (st.running && st.mode==='auto')) return;
+  clearTimeout(timer); $('#busy').classList.add('on');
+  timer=setTimeout(()=>{ requestAnimationFrame(()=>setTimeout(()=>{ try{ analyze(); refresh(); }catch(e){ console.error(e); } $('#busy').classList.remove('on'); },0)); },220);
+}
+
+/* ---------- drawing ---------- */
+const cv=$('#cv'), ctx=cv.getContext('2d');
+function draw(c2, o2){
+  const w=st.w, h=st.h, n=w*h, res=st.res;
+  const img=c2.createImageData(w,h), o=img.data, g=o2.gain;
+  const pick=c=> st.ch[c] ? ((o2.bg&&st.src[c])?st.src[c].arr:st.ch[c].norm) : null;
+  const D=o2.D?st.ch.dapi.norm:null, R=o2.R?pick('red'):null, G=o2.G?pick('green'):null;
+  for (let i=0;i<n;i++){
+    const d=D?D[i]*g:0, r=R?R[i]*g:0, gg=G?G[i]*g:0;
+    o[i*4]=r+d*0.15; o[i*4+1]=gg+d*0.25; o[i*4+2]=d; o[i*4+3]=255;
+  }
+  const thick=Math.max(w,h)>1200;
+  const put=(i,c)=>{o[i*4]=c[0];o[i*4+1]=c[1];o[i*4+2]=c[2];};
+  if (res && o2.outline){
+    const L=res.nuc;
+    for (let y=0;y<h;y++) for (let x=0;x<w;x++){
+      const i=y*w+x, l=L[i]; if(!l) continue;
+      const b=(x===0||L[i-1]!==l)||(x===w-1||L[i+1]!==l)||(y===0||L[i-w]!==l)||(y===h-1||L[i+w]!==l);
+      if(!b) continue;
+      let c = st.excluded.has(l)?[70,70,70]:CLASS_RGB[res.cells[l-1].cls];
+      if (l===o2.selected) c=[255,255,255];
+      put(i,c); if(thick){ if(x<w-1)put(i+1,c); if(y<h-1)put(i+w,c); }
+    }
+  }
+  if (res && o2.dots){
+    const arm=thick?3:2;
+    for (const [list,col] of [[res.dots,[255,255,255]],[res.gdots,[77,232,255]]]){
+      for (const i of list){
+        const x=i%w, y=(i-x)/w, c = res.meas[i] && !st.excluded.has(res.meas[i]) ? col : [120,120,120];
+        for (let k=-arm;k<=arm;k++){ if(x+k>=0&&x+k<w) put(i+k,c); if(y+k>=0&&y+k<h) put(i+k*w,c); }
+      }
+    }
+  }
+  c2.putImageData(img,0,0);
+  if (res && o2.numbers){
+    const fs=Math.max(9,Math.round(Math.min(w,h)/70));
+    c2.font=`700 ${fs}px "IBM Plex Sans JP",sans-serif`; c2.textAlign='center'; c2.textBaseline='middle';
+    c2.lineWidth=Math.max(2,fs/4); c2.lineJoin='round'; c2.strokeStyle='rgba(0,0,0,.85)';
+    for (const c of res.cells){
+      c2.fillStyle = st.excluded.has(c.id) ? '#8a8a8a' : '#ffffff';
+      c2.strokeText(String(c.id),c.x,c.y); c2.fillText(String(c.id),c.x,c.y);
+    }
+  }
+}
+function render(){
+  if (!st.ch.dapi) return;
+  if (cv.width!==st.w||cv.height!==st.h){ cv.width=st.w; cv.height=st.h; }
+  draw(ctx,{D:$('#vD').checked,R:$('#vR').checked,G:$('#vG').checked,bg:$('#vBg').checked,outline:$('#vO').checked,
+    dots:$('#vDot').checked,numbers:$('#vN').checked,gain:+$('#gain').value,selected:st.selected});
+}
+function outputPng(bg){
+  const c=document.createElement('canvas'); c.width=st.w; c.height=st.h;
+  draw(c.getContext('2d'),{D:true,R:true,G:true,bg:!!bg,outline:true,dots:true,numbers:true,gain:+$('#gain').value,selected:0});
+  return new Promise(r=>c.toBlob(r,'image/png'));
+}
+function applyZoom(){
+  const z=$('#zoom').value, stage=$('#stage');
+  if (z==='fit'){ stage.classList.add('fit'); cv.style.width=''; }
+  else { stage.classList.remove('fit'); cv.style.width=(st.w*+z)+'px'; }
+}
+
+/* ---------- summary & info ---------- */
+function stats(){
+  const res=st.res, s={total:0,red:0,green:0,both:0,ro:0,go:0,neg:0,excluded:st.excluded.size};
+  if(!res) return s;
+  for (const c of res.cells){ if(st.excluded.has(c.id)) continue; s.total++;
+    if(c.rp)s.red++; if(c.gp)s.green++; if(c.cls===3)s.both++; else if(c.cls===1)s.ro++; else if(c.cls===2)s.go++; else s.neg++; }
+  return s;
+}
+const pct=(a,b)=>b?(a/b*100).toFixed(1)+'%':'–';
+function renderSummary(){
+  const s=stats(), res=st.res, hr=res&&res.hasR, hg=res&&res.hasG;
+  $('#nTotal').textContent = res? s.total : '–';
+  const set=(id,v,show)=>{ $('#n'+id).textContent = res&&show ? v : '–'; $('#p'+id).textContent = res&&show ? pct(v,s.total) : ''; };
+  set('Red',s.red,hr); set('Green',s.green,hg); set('Both',s.both,hr&&hg); set('RO',s.ro,hr); set('GO',s.go,hg); set('Neg',s.neg,true);
+  const segs=$('#bar').children, vals=[s.both,s.ro,s.go,s.neg];
+  for (let i=0;i<4;i++) segs[i].style.width = s.total? (vals[i]/s.total*100)+'%' : '0';
+  let r=''; if(res&&hr&&hg) r+=`<p>赤陽性のうち緑も陽性：${pct(s.both,s.red)}</p><p>緑陽性のうち赤も陽性：${pct(s.both,s.green)}</p>`;
+  if (st.excluded.size) r+=`<p>手動で除外した核：${st.excluded.size}個</p>`;
+  $('#ratios').innerHTML=r;
+}
+function renderInfo(){
+  const el=$('#info'), res=st.res;
+  if (!res){ el.textContent=''; return; }
+  let head='';
+  const isSaved = !st.running && st.shown>=0 && st.results[st.shown];
+  if (isSaved) head=`<b>保存済みの結果を表示中。</b>設定の変更や核の除外をしたら「この画像の結果を更新」で反映できます。<button class="btn small" type="button" id="updBtn">この画像の結果を更新</button><br>`;
+  if (!st.selected){ el.innerHTML = head + `${res.cells.length}個の核を検出しました。核をクリックするとドット数の確認や除外ができます（設定を変えると除外はリセットされます）。`; }
+  else {
+    const c=res.cells[st.selected-1], ex=st.excluded.has(c.id), col=CLASS_RGB[c.cls];
+    el.innerHTML = head + `<b>核 #${c.id}</b>　面積 ${c.area} px²` + (res.hasR?`　赤ドット ${c.dots}個`:'') + (res.hasG?`　緑ドット ${c.gdots}個`:'') +
+      `<span class="tag" style="background:rgb(${col.join(',')})">${ex?'除外中':CLASS_NAME[c.cls]}</span>` +
+      `<button class="btn small" type="button" id="exBtn">${ex?'数に戻す':'この核を除外'}</button>`;
+    $('#exBtn').onclick=()=>{ ex?st.excluded.delete(c.id):st.excluded.add(c.id); render(); renderSummary(); renderInfo(); };
+  }
+  const u=$('#updBtn'); if(u) u.onclick=async()=>{ await commit(st.shown); renderTable(); $('#runMsg').className='msg ok'; $('#runMsg').textContent=`#${st.shown+1} の結果を更新しました。`; };
+}
+cv.addEventListener('click', e=>{
+  if (!st.res || (st.running && st.mode==='auto')) return;
+  const r=cv.getBoundingClientRect();
+  const x=Math.floor((e.clientX-r.left)/r.width*st.w), y=Math.floor((e.clientY-r.top)/r.height*st.h);
+  if (x<0||y<0||x>=st.w||y>=st.h) return;
+  let l=st.res.nuc[y*st.w+x];
+  if(!l){ outer: for(let rr=1;rr<=4;rr++) for(let dy=-rr;dy<=rr;dy++) for(let dx=-rr;dx<=rr;dx++){ const xx=x+dx,yy=y+dy; if(xx<0||yy<0||xx>=st.w||yy>=st.h) continue; const v=st.res.nuc[yy*st.w+xx]; if(v){l=v;break outer;} } }
+  st.selected = l===st.selected?0:l;
+  render(); renderInfo();
+});
+
+/* ---------- folders & sets ---------- */
+function baseName(n){ return n.replace(/\.[^.]+$/,''); }
+function setSlot(ch,label){
+  const s=document.querySelector(`.slot[data-ch="${ch}"]`);
+  s.classList.toggle('ok',!!label); s.querySelector('.meta span').textContent=label||'未選択';
+}
+function buildSets(){
+  const F=st.folders, warn=$('#pairWarn');
+  const used=CH.filter(c=>F[c].length);
+  st.sets=[]; st.status=[]; st.results=[]; st.errors=[]; st.shown=-1;
+  warn.hidden=true;
+  if (!F.dapi.length){ renderPairs(); renderTable(); updateStart(); return; }
+  const n=Math.min(...used.map(c=>F[c].length));
+  const msgs=[];
+  if (used.some(c=>F[c].length!==n)) msgs.push(`枚数が違います（${CH.map(c=>`${CH_JA[c]} ${F[c].length}枚`).join('・')}）。少ない方に合わせて${n}組を処理します。`);
+  for (const c of ['red','green']) if(!F[c].length) msgs.push(`${CH_JA[c]}のフォルダが未選択です。${CH_JA[c]}は判定せずに進みます。`);
+  if (msgs.length){ warn.innerHTML=msgs.join('<br>'); warn.hidden=false; }
+  for (let i=0;i<n;i++) st.sets.push({name:baseName(F.dapi[i].name), dapi:F.dapi[i], red:F.red[i]||null, green:F.green[i]||null});
+  st.status=st.sets.map(()=>'wait');
+  renderPairs(); renderTable(); updateStart();
+  preview(0,true);
+}
+function renderPairs(){
+  const box=$('#pairs'), tb=box.querySelector('tbody'); tb.innerHTML='';
+  box.hidden=!st.sets.length; $('#pairHint').hidden=!st.sets.length;
+  st.sets.forEach((s,i)=>{
+    const tr=document.createElement('tr'); if(i===st.shown) tr.className='on';
+    tr.innerHTML=`<td>${i+1}</td>`+CH.map(c=>`<td title="${esc(s[c]?s[c].name:'')}">${esc(s[c]?s[c].name:'—')}</td>`).join('');
+    tr.onclick=()=>openRow(i); tb.appendChild(tr);
+  });
+}
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+document.querySelectorAll('.slot').forEach(s=>{
+  const inp=s.querySelector('input'), ch=s.dataset.ch;
+  s.querySelector('button').onclick=()=>inp.click();
+  inp.onchange=()=>{
+    const all=[...inp.files];
+    const files=all.filter(f=>IMG_RE.test(f.name)&&!f.name.startsWith('.'));
+    const key=f=>f.webkitRelativePath||f.name;
+    files.sort((a,b)=>key(a).localeCompare(key(b),'ja',{numeric:true,sensitivity:'base'}));
+    st.folders[ch]=files.map(f=>({name:f.name,file:f}));
+    const folder=(all[0]&&all[0].webkitRelativePath||'').split('/')[0];
+    setSlot(ch, files.length ? `${folder?folder+'（':''}${files.length}枚${folder?'）':''}` : (all.length?'画像が見つかりません':null));
+    inp.value='';
+    buildSets();
+  };
+});
+function loadSamples(){
+  const seeds=[20261029,7731,4242,90210];
+  for (const c of CH) st.folders[c]=[];
+  seeds.forEach((sd,k)=>{
+    const s=makeSample(sd), no=String(k+1).padStart(2,'0');
+    st.folders.dapi.push({name:`sample_${no}_DAPI.tif`,data:{w:s.w,h:s.h,raw:s.D}});
+    st.folders.red.push({name:`sample_${no}_red.tif`,data:{w:s.w,h:s.h,raw:s.R}});
+    st.folders.green.push({name:`sample_${no}_green.tif`,data:{w:s.w,h:s.h,raw:s.G}});
+  });
+  for (const c of CH) setSlot(c,`サンプル（${seeds.length}枚）`);
+  buildSets();
+}
+$('#sampleBtn').onclick=loadSamples; $('#sampleBtn2').onclick=loadSamples;
+
+async function loadSet(i){
+  const s=st.sets[i], out={};
+  for (const c of CH){
+    const it=s[c]; if(!it){ out[c]=null; continue; }
+    const im = it.data ? it.data : await decodeFile(it.file);
+    out[c]={w:im.w,h:im.h,norm:normalize(im.raw),name:it.name};
+  }
+  for (const c of ['red','green']) if(out[c]&&(out[c].w!==out.dapi.w||out[c].h!==out.dapi.h))
+    throw new Error(`${CH_JA[c]}の画像サイズ（${out[c].w}×${out[c].h}）がDAPI（${out.dapi.w}×${out.dapi.h}）と違います`);
+  st.ch=out; st.w=out.dapi.w; st.h=out.dapi.h; st.blurSigma=-1; st.src={};
+  st.shown=i; st.res=null;
+  $('#empty').hidden=true; cv.hidden=false; applyZoom();
+  $('#curName').textContent=`#${i+1}　${s.name}`;
+  renderPairs(); renderTable();
+}
+function setBadge(t){ const b=$('#curBadge'); b.hidden=!t; b.textContent=t||''; }
+
+/* preview before running, or view a finished result */
+async function preview(i,auto){
+  if (st.running || !st.sets[i]) return;
+  const tok=++st.loadToken;
+  $('#busy').classList.add('on');
+  try{
+    await loadSet(i); if(tok!==st.loadToken) return;
+    if (auto && !(runMode()==='auto' && thrMode()==='fixed' && st.results.length)) autoThresholds();
+    analyze(); refresh(); setBadge('プレビュー');
+  }catch(e){ console.error(e); $('#info').innerHTML=`<span class="msg err">#${i+1} を読み込めませんでした：${esc(e.message||e)}</span>`; }
+  $('#busy').classList.remove('on');
+}
+async function viewResult(i){
+  if (st.running) return;
+  const r=st.results[i]; if(!r) return preview(i,false);
+  const tok=++st.loadToken; $('#busy').classList.add('on');
+  try{
+    await loadSet(i); if(tok!==st.loadToken) return;
+    setParams(r.params); analyze(); st.excluded=new Set(r.excluded); refresh(); setBadge('保存済みの結果');
+  }catch(e){ console.error(e); }
+  $('#busy').classList.remove('on');
+}
+function openRow(i){
+  if (st.running) return;
+  if (st.results[i]) viewResult(i); else preview(i, i===0 && !st.results.length);
+}
+
+/* ---------- running ---------- */
+function updateStart(){ $('#startBtn').disabled = st.running || !st.sets.length; $('#saveBtn').disabled = st.running || !st.results.some(Boolean); }
+function lock(on){
+  document.querySelectorAll('.slot button,#sampleBtn,#sampleBtn2').forEach(b=>b.disabled=on);
+  $('#modeFs').disabled=on;
+  $('#setFs').disabled = on && st.mode==='auto';
+  $('#stopRow').hidden = !(on && st.mode==='auto');
+  updateStart();
+}
+function progress(done){
+  const n=st.sets.length; $('#prog').hidden=false;
+  $('#progText').textContent=`${done} / ${n} 組`; $('#progPct').textContent=n?Math.round(done/n*100)+'%':'';
+  $('#progBar').style.width=(n?done/n*100:0)+'%';
+}
+function nucleusCsv(res){
+  const head='nucleus_id,x,y,area_px,dapi_mean,red_dots,green_dots,red_positive,green_positive,class,excluded';
+  const rows=res.cells.map(c=>[c.id,c.x.toFixed(1),c.y.toFixed(1),c.area,c.dapi.toFixed(1),
+    res.hasR?c.dots:'', res.hasG?c.gdots:'', res.hasR?(c.rp?1:0):'', res.hasG?(c.gp?1:0):'', CLASS_EN[c.cls], st.excluded.has(c.id)?1:0].join(','));
+  return [head,...rows].join('\r\n');
+}
+async function commit(i){
+  const s=st.sets[i], res=st.res;
+  const png=await outputPng(false), pngBg=await outputPng(true);
+  st.results[i]={name:s.name, files:CH.map(c=>s[c]?s[c].name:''), counts:stats(), params:{...res.params},
+    excluded:[...st.excluded], csv:nucleusCsv(res), png, pngBg, hasR:res.hasR, hasG:res.hasG};
+  st.status[i]='done';
+}
+function ask(title,text){
+  return new Promise(res=>{ const d=$('#dlg'); $('#dlgTitle').textContent=title; $('#dlgText').textContent=text;
+    $('#dlgYes').onclick=()=>{d.close();res(true);}; $('#dlgNo').onclick=()=>{d.close();res(false);}; d.showModal(); });
+}
+$('#startBtn').onclick=async()=>{
+  if (!st.sets.length || st.running) return;
+  if (st.results.some(Boolean) && !(await ask('もう一度解析しますか？','いまの結果は消えます。保存がまだなら、先に「結果をZIPで保存」してください。'))) return;
+  st.mode=runMode(); st.results=[]; st.errors=[]; st.status=st.sets.map(()=>'wait');
+  st.running=true; st.stop=false; st.loadToken++;
+  $('#runMsg').className='msg'; $('#runMsg').textContent=''; $('#saveMsg').textContent='';
+  st.startedAt=new Date(); st.thrModeUsed = st.mode==='auto' ? thrMode() : 'manual';
+  lock(true); renderTable(); progress(0);
+  if (st.mode==='auto') runAuto(); else openManual(0);
+};
+$('#stopBtn').onclick=()=>{ st.stop=true; $('#runMsg').textContent='中止しています…'; };
+async function runAuto(){
+  const fixed = thrMode()==='fixed';
+  for (let i=0;i<st.sets.length;i++){
+    if (st.stop) break;
+    st.cur=i; st.status[i]='run'; renderTable(); setBadge('処理中');
+    try{
+      await loadSet(i);
+      if (!fixed) autoThresholds();
+      analyze(); refresh(); await commit(i);
+    }catch(e){ console.error(e); st.status[i]='error'; st.errors[i]=e.message||String(e); }
+    renderTable(); progress(i+1);
+    await new Promise(r=>setTimeout(r,20));
+  }
+  finish();
+}
+async function openManual(i){
+  if (i>=st.sets.length || st.stop) return finish();
+  st.cur=i; st.status[i]='run'; renderTable(); progress(i);
+  $('#actbar').hidden=false;
+  $('#actText').innerHTML=`<b>${i+1} / ${st.sets.length} 組目</b>　設定と除外を確認してから「確定して次へ」を押してください。`;
+  $('#nextBtn').disabled=true; setBadge('確認中');
+  $('#busy').classList.add('on');
+  try{
+    await loadSet(i);
+    if (i===0 || !$('#carry').checked) autoThresholds();
+    analyze(); refresh(); $('#nextBtn').disabled=false;
+  }catch(e){
+    console.error(e); st.status[i]='error'; st.errors[i]=e.message||String(e); renderTable();
+    $('#actText').innerHTML=`<b>${i+1} / ${st.sets.length} 組目</b>　<span class="msg err">読み込めませんでした：${esc(st.errors[i])}</span>　「スキップ」で次へ進めます。`;
+  }
+  $('#busy').classList.remove('on');
+}
+$('#nextBtn').onclick=async()=>{ const i=st.cur; $('#nextBtn').disabled=true; await commit(i); renderTable(); progress(i+1); openManual(i+1); };
+$('#skipBtn').onclick=()=>{ const i=st.cur; if(st.status[i]!=='error') st.status[i]='skip'; renderTable(); progress(i+1); openManual(i+1); };
+$('#endBtn').onclick=()=>{ if(st.status[st.cur]==='run') st.status[st.cur]='wait'; finish(); };
+function finish(){
+  st.running=false; st.cur=-1;
+  st.status=st.status.map(s=>s==='run'?'wait':s);
+  $('#actbar').hidden=true; lock(false); renderTable();
+  const done=st.status.filter(s=>s==='done').length, err=st.status.filter(s=>s==='error').length, skip=st.status.filter(s=>s==='skip').length;
+  const m=$('#runMsg');
+  m.className='msg '+(done?'ok':'err');
+  m.textContent=`${st.stop?'中止しました。':'完了しました。'}${done}組を解析${skip?`・${skip}組をスキップ`:''}${err?`・${err}組は読み込みエラー`:''}。結果を保存するには「結果をZIPで保存」を押してください。`;
+  setBadge(st.results[st.shown]?'保存済みの結果':'');
+  renderInfo(); updateStart();
+}
+
+/* ---------- results table ---------- */
+const STATUS_JA={wait:'待機',run:'処理中',done:'完了',skip:'スキップ',error:'エラー'};
+function renderTable(){
+  const tb=$('#resTable tbody'); tb.innerHTML='';
+  const has=st.sets.length>0;
+  $('#resWrap').hidden=!has; $('#noRes').hidden=has; $('#resHint').hidden=!st.results.some(Boolean);
+  const T={total:0,red:0,green:0,both:0};
+  st.sets.forEach((s,i)=>{
+    const r=st.results[i], tr=document.createElement('tr'), stt=st.status[i]||'wait';
+    if (i===st.shown) tr.className='on';
+    if (r){ T.total+=r.counts.total; T.red+=r.counts.red; T.green+=r.counts.green; T.both+=r.counts.both; }
+    const c=r?r.counts:null;
+    tr.innerHTML=`<td>${i+1}</td><td title="${esc(s.name)}">${esc(s.name)}</td><td>${c?c.total:''}</td><td>${c&&r.hasR?c.red:''}</td><td>${c&&r.hasG?c.green:''}</td><td>${c&&r.hasR&&r.hasG?c.both:''}</td><td>${c&&r.hasR&&r.hasG?pct(c.both,c.total):''}</td><td><span class="stt ${stt}" title="${esc(st.errors[i]||'')}">${STATUS_JA[stt]}</span></td>`;
+    tr.onclick=()=>openRow(i);
+    tb.appendChild(tr);
+  });
+  $('#resTable tfoot').innerHTML = st.results.some(Boolean) ? `<tr><td></td><td>合計</td><td>${T.total}</td><td>${T.red}</td><td>${T.green}</td><td>${T.both}</td><td>${pct(T.both,T.total)}</td><td></td></tr>` : '';
+  const on=tb.querySelector('tr.on'); if(on && st.running) on.scrollIntoView({block:'nearest'});
+}
+
+/* ---------- saving ---------- */
+function stamp(d){ const z=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`; }
+function summaryCsv(){
+  const head='image_no,image_name,dapi_file,red_file,green_file,nuclei_total,red_positive,green_positive,double_positive,red_only,green_only,negative,double_per_total,double_per_red,double_per_green,manually_excluded,dapi_threshold,red_dot_threshold,green_dot_threshold,red_min_dots,green_min_dots';
+  const q=s=>'"'+String(s).replace(/"/g,'""')+'"', r4=(a,b)=>b?(a/b).toFixed(4):'';
+  const rows=[]; const T={total:0,red:0,green:0,both:0,ro:0,go:0,neg:0,excluded:0};
+  st.sets.forEach((s,i)=>{
+    const r=st.results[i]; if(!r) return; const c=r.counts, p=r.params;
+    for (const k in T) T[k]+=c[k];
+    rows.push([i+1,q(r.name),q(r.files[0]),q(r.files[1]),q(r.files[2]),c.total,r.hasR?c.red:'',r.hasG?c.green:'',r.hasR&&r.hasG?c.both:'',r.hasR?c.ro:'',r.hasG?c.go:'',c.neg,
+      r4(c.both,c.total),r4(c.both,c.red),r4(c.both,c.green),c.excluded,p.tD,r.hasR?p.tDot:'',r.hasG?p.tDotG:'',p.minDots,p.minDotsG].join(','));
+  });
+  rows.push(['TOTAL','"合計"','','','',T.total,T.red,T.green,T.both,T.ro,T.go,T.neg,r4(T.both,T.total),r4(T.both,T.red),r4(T.both,T.green),T.excluded,'','','','',''].join(','));
+  return [head,...rows].join('\r\n');
+}
+function settingsTxt(){
+  const first=st.results.find(Boolean), p=first?first.params:P();
+  const mode = st.thrModeUsed==='manual' ? '1枚ずつ確認（手動で調整・確定）' : st.thrModeUsed==='fixed' ? '自動で一括処理（閾値は全画像で固定）' : '自動で一括処理（閾値は画像ごとに自動計算）';
+  return [
+    '核カウンター 解析記録',
+    `解析日時: ${(st.startedAt||new Date()).toLocaleString('ja-JP')}`,
+    `進め方: ${mode}`,
+    `解析した組数: ${st.results.filter(Boolean).length} / ${st.sets.length}`,
+    '',
+    '[設定（1組目の値。画像ごとの閾値は summary.csv を参照）]',
+    `ぼかし sigma: ${p.sigma}`, `DAPI閾値: ${p.tD}`, `穴埋め: ${p.fill?'あり':'なし'}`,
+    `接触核の分割: ${p.split?`あり（半径 ${p.splitR} px）`:'なし'}`, `核の面積: ${p.minA}〜${p.maxA} px²`, `端の核を除外: ${p.edge?'はい':'いいえ'}`,
+    `赤 背景除去: ${p.bgR?`あり（${p.bgRad} px）`:'なし'} / ドット閾値: ${p.tDot} / 陽性: ${p.minDots}個以上`,
+    `緑 背景除去: ${p.bgG?`あり（${p.bgRadG} px）`:'なし'} / ドット閾値: ${p.tDotG} / 陽性: ${p.minDotsG}個以上`,
+    `判定範囲の拡張: ${p.expand} px`,
+    '',
+    '[方法]',
+    '各チャンネルを0〜255に正規化（下位0.1%〜上位0.05%）。DAPIはガウシアン平滑化後に閾値で二値化し、穴埋め、距離変換に基づくマーカー付きWatershed法で接触核を分割、面積で選別した。',
+    '赤・緑はガウシアン平滑化（sigma=1）後、ホワイトトップハット変換で背景を除去し、閾値を超える局所最大点をドットとして検出した。核（判定範囲）内のドット数が規定数以上の核を陽性とした。',
+    '自動閾値: DAPIは大津法、ドットは「中央値＋6×MAD×1.4826」。',
+    '',
+    '[フォルダの中身]',
+    'summary.csv          … 組ごとの集計（最後の行が合計）',
+    'nuclei_data/         … 核ごとのデータ（番号、位置、面積、ドット数、判定）',
+    'overlay_images/      … 判定画像。輪郭の色: 黄=共陽性、赤=赤のみ、緑=緑のみ、灰=陰性、暗い灰=手動で除外。十字: 白=赤ドット、水色=緑ドット。数字は nuclei_data の nucleus_id。',
+    'overlay_images_bgsub/ … 同じ判定を、背景除去後の赤・緑で表示した画像（DAPIは元のまま）。',
+  ].join('\r\n');
+}
+async function saveAll(){
+  const msg=$('#saveMsg'); msg.className='msg'; msg.textContent='保存の準備をしています…';
+  const root=`results_${stamp(st.startedAt||new Date())}`, files=[], seen=new Set();
+  const uniq=n=>{ let k=n, j=2; while(seen.has(k)){ k=n.replace(/(\.[^.]+)$/,`_${j++}$1`); } seen.add(k); return k; };
+  st.sets.forEach((s,i)=>{ const r=st.results[i]; if(!r) return;
+    const b=String(i+1).padStart(3,'0')+'_'+r.name.replace(/[\\/:*?"<>|]+/g,'_');
+    files.push({dir:'nuclei_data',name:uniq(b+'_nuclei.csv'),data:'\uFEFF'+r.csv});
+    files.push({dir:'overlay_images',name:uniq(b+'_overlay.png'),data:r.png});
+    files.push({dir:'overlay_images_bgsub',name:uniq(b+'_overlay_bgsub.png'),data:r.pngBg});
+  });
+  files.push({dir:'',name:'summary.csv',data:'\uFEFF'+summaryCsv()});
+  files.push({dir:'',name:'settings.txt',data:'\uFEFF'+settingsTxt()});
+  // always save as one ZIP that contains the folder layout
+  msg.textContent='ZIPファイルを作成しています…';
+  if (typeof JSZip==='undefined'){ msg.className='msg err'; msg.textContent='ZIP作成用の部品を読み込めませんでした。ネットワークを確認して再読み込みしてください。'; return; }
+  const zip=new JSZip(), top=zip.folder(root);
+  for (const f of files) (f.dir?top.folder(f.dir):top).file(f.name,f.data);
+  const blob=await zip.generateAsync({type:'blob'});
+  if (dl){ try{ await dl.save({filename:root+'.zip',data:blob}); msg.className='msg ok'; msg.textContent=`「${root}.zip」を保存しました。展開すると「${root}」フォルダができます。`; return; }catch(e){ if(e&&e.code==='declined'){ msg.textContent=''; return; } } }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=root+'.zip'; document.body.appendChild(a); a.click(); a.remove();
+  msg.className='msg ok'; msg.textContent=`「${root}.zip」を保存しました。展開すると「${root}」フォルダができます。`;
+}
+$('#saveBtn').onclick=()=>{ $('#saveBtn').disabled=true; saveAll().catch(e=>{ console.error(e); $('#saveMsg').className='msg err'; $('#saveMsg').textContent='保存できませんでした：'+(e.message||e); }).finally(updateStart); };
+
+/* ---------- controls ---------- */
+for (const id in fmt) $('#'+id).addEventListener('input',()=>{ updateOutputs(); schedule(); });
+['fill','split','edge','minA','maxA','bgR','bgG'].forEach(id=>$('#'+id).addEventListener('change',()=>{ updateOutputs(); schedule(); }));
+document.querySelectorAll('[data-auto]').forEach(b=>b.onclick=()=>{
+  if (!st.ch.dapi) return; const p=P(), id=b.dataset.auto;
+  if (id==='tD') setVal('tD',otsu(getBlur(p.sigma)));
+  if (id==='tDot'&&st.ch.red) setVal('tDot',robustAuto(getSrc('red',p)));
+  if (id==='tDotG'&&st.ch.green) setVal('tDotG',robustAuto(getSrc('green',p)));
+  schedule();
+});
+document.querySelectorAll('input[name=runmode]').forEach(r=>r.addEventListener('change',()=>{ const m=runMode(); $('#autoOpts').hidden=m!=='auto'; $('#manualOpts').hidden=m!=='manual'; }));
+['vD','vR','vG','vO','vDot','vN','vBg','gain'].forEach(id=>$('#'+id).addEventListener('input',render));
+$('#zoom').addEventListener('change',applyZoom);
+updateOutputs(); renderSummary(); renderTable();
+$('#info').textContent='まずは左の「サンプル（4組）で試す」で流れを確認できます。';
+})();
+</script>
+</body>
+</html>
